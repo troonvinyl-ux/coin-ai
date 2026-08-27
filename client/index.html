@@ -1,58 +1,83 @@
 <!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Coin AI - Demo</title>
-    <style>
-      body { font-family: Arial, Helvetica, sans-serif; max-width: 700px; margin: 2rem auto; }
-      #chat { border: 1px solid #ddd; padding: 1rem; height: 400px; overflow: auto; }
-      .msg { margin: 0.5rem 0; }
-      .user { color: blue; }
-      .assistant { color: green; }
-    </style>
-  </head>
-  <body>
-    <h1>Coin AI — Demo</h1>
-    <div id="chat"></div>
-    <form id="form">
-      <input id="input" type="text" placeholder="Say something" style="width:80%" />
-      <button type="submit">Send</button>
-    </form>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#101114">
+<title>KeenOnCoins — Coin AI</title>
+<style>
+:root{font-family:system-ui,-apple-system,sans-serif;background:#101114;color:#fff}
+*{box-sizing:border-box}body{margin:0;background:#101114}main{max-width:760px;margin:auto;padding:20px}
+header{padding:10px 0 18px}h1{margin:0;font-size:30px}p{opacity:.75}
+.card{background:#191b21;border-radius:20px;padding:18px;margin:14px 0}
+label{display:block;font-weight:700;margin-bottom:8px}
+input,textarea,button{font:inherit;width:100%;border:0;border-radius:14px;padding:14px;margin-top:8px}
+input,textarea{background:#262933;color:#fff}textarea{min-height:130px;resize:vertical}
+button{font-weight:800;background:#fff;color:#101114}.secondary{background:#292d38;color:#fff}
+.preview{width:100%;max-height:360px;object-fit:contain;background:#0b0c0f;border-radius:14px;margin-top:12px;display:none}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.small{font-size:13px;opacity:.6}
+.status{white-space:pre-wrap}
+</style>
+</head>
+<body>
+<main>
+<header>
+<div class="small">KEENONCOINS</div>
+<h1>🪙 Coin AI</h1>
+<p>Identify a coin, prepare an eBay listing, and keep your eBay credentials out of the browser.</p>
+</header>
 
-    <script>
-      const chat = document.getElementById('chat');
-      const form = document.getElementById('form');
-      const input = document.getElementById('input');
+<section class="card">
+<label>Coin photo</label>
+<input id="photo" type="file" accept="image/*" capture="environment">
+<img id="preview" class="preview">
+<button id="analyse">Identify coin</button>
+</section>
 
-      function append(role, text) {
-        const d = document.createElement('div');
-        d.className = 'msg ' + role;
-        d.textContent = (role === 'user' ? 'You: ' : 'AI: ') + text;
-        chat.appendChild(d);
-        chat.scrollTop = chat.scrollHeight;
-      }
+<section class="card">
+<label>Identification / notes</label>
+<textarea id="notes" placeholder="AI identification will appear here. You can edit it before creating the listing."></textarea>
+<div class="row">
+<input id="price" inputmode="decimal" placeholder="eBay price £">
+<input id="quantity" inputmode="numeric" value="1" placeholder="Quantity">
+</div>
+<button id="draft">Create eBay listing draft</button>
+<p id="status" class="status small"></p>
+</section>
 
-      form.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const text = input.value.trim();
-        if (!text) return;
-        append('user', text);
-        input.value = '';
-
-        try {
-          const res = await fetch('/api/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: text })
-          });
-          const data = await res.json();
-          // Azure Chat Completions responses typically have choices[0].message.content
-          const reply = data?.choices?.[0]?.message?.content || JSON.stringify(data);
-          append('assistant', reply);
-        } catch (err) {
-          append('assistant', 'Error: ' + err.message);
-        }
-      });
-    </script>
-  </body>
+<section class="card">
+<div class="small">eBay connection</div>
+<p>eBay API credentials belong on the server. Add them later when your eBay developer details are ready.</p>
+</section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+$('photo').onchange=()=>{const f=$('photo').files[0];if(!f)return;const r=new FileReader();r.onload=()=>{$('preview').src=r.result;$('preview').style.display='block'};r.readAsDataURL(f)};
+async function call(path,body){
+  const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(data.error||'Request failed');
+  return data;
+}
+$('analyse').onclick=async()=>{
+ const f=$('photo').files[0];
+ if(!f){$('status').textContent='Choose a coin photo first.';return}
+ $('status').textContent='Sending image for analysis…';
+ try{
+   const data=await call('/api/identify',{image: $('preview').src});
+   $('notes').value=data.identification||data.message||'Identification returned. Check and edit before listing.';
+   $('status').textContent='Identification complete. Review the details before creating the listing.';
+ }catch(e){$('status').textContent='Identification unavailable: '+e.message+'\nThe page is ready for your Azure/eBay credentials later.'}
+};
+$('draft').onclick=async()=>{
+ const title=$('notes').value.trim();
+ if(!title){$('status').textContent='Add identification/details first.';return}
+ try{
+   const data=await call('/api/ebay/draft',{title,price:$('price').value,quantity:$('quantity').value});
+   $('status').textContent=data.message||'eBay listing draft created.';
+ }catch(e){$('status').textContent='eBay is not connected yet: '+e.message}
+};
+</script>
+</body>
 </html>

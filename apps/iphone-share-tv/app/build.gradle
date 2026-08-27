@@ -1,0 +1,5 @@
+plugins { id 'com.android.application' }
+
+android { namespace 'com.troonvinyl.iphoneshare'; compileSdk 36
+    defaultConfig { applicationId 'com.troonvinyl.iphoneshare'; minSdk 23; targetSdk 36; versionCode 1; versionName '1.0' }
+}
