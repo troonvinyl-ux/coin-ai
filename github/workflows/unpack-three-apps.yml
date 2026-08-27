@@ -1,0 +1,44 @@
+name: Unpack Three Apps
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "coin-ai-three-apps-ready.zip"
+
+permissions:
+  contents: write
+
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract three-app package
+        run: |
+          unzip -o coin-ai-three-apps-ready.zip -d extracted
+
+          cp -R extracted/apps ./apps
+          cp -R extracted/.github ./extracted-github 2>/dev/null || true
+
+          if [ -d "extracted/client" ]; then
+            cp -R extracted/client/* ./client/
+          fi
+
+          if [ -d "extracted/server" ]; then
+            cp -R extracted/server/* ./server/
+          fi
+
+          rm -rf extracted
+          rm -f coin-ai-three-apps-ready.zip
+
+      - name: Commit extracted applications
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add .
+          git diff --cached --quiet || git commit -m "Add Coin AI, Metronome and iPhone Share apps"
+          git push
