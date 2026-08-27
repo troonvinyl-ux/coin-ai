@@ -21,14 +21,18 @@ jobs:
         run: |
           unzip -o coin-ai-three-apps-ready.zip -d extracted
 
-          cp -R extracted/apps ./apps
+          mkdir -p apps
+
+          if [ -d "extracted/apps" ]; then
+            cp -R extracted/apps/. apps/
+          fi
 
           if [ -d "extracted/client" ]; then
-            cp -R extracted/client/* ./client/
+            cp -R extracted/client/. client/
           fi
 
           if [ -d "extracted/server" ]; then
-            cp -R extracted/server/* ./server/
+            cp -R extracted/server/. server/
           fi
 
           rm -rf extracted
@@ -39,5 +43,5 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
           git add .
-          git diff --cached --quiet || git commit -m "Add three apps"
+          git diff --cached --quiet || git commit -m "Add Coin AI, Metronome and iPhone Share apps"
           git push
