@@ -14,26 +14,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install dependencies
-        working-directory: apps/metronome
-        run: npm install
-
-      - name: Check web app files
-        working-directory: apps/metronome
+      - name: Check Metronome files
         run: |
-          test -f index.html
-          test -f server.js
-          test -f package.json
+          test -f apps/metronome/index.html
+          test -f apps/metronome/manifest.webmanifest
 
       - name: Package web app
         run: |
+          rm -rf dist
           mkdir -p dist
-          cp -r apps/metronome/* dist/
+          cp -r apps/metronome/. dist/
           cd dist
           zip -r ../metronome-web-app.zip .
 
