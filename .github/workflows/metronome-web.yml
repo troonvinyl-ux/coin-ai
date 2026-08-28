@@ -1,0 +1,44 @@
+name: Build Metronome Web App
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: apps/metronome
+        run: npm install
+
+      - name: Check web app files
+        working-directory: apps/metronome
+        run: |
+          test -f index.html
+          test -f server.js
+          test -f package.json
+
+      - name: Package web app
+        run: |
+          mkdir -p dist
+          cp -r apps/metronome/* dist/
+          cd dist
+          zip -r ../metronome-web-app.zip .
+
+      - name: Upload web app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: metronome-web-app
+          path: metronome-web-app.zip
