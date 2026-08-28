@@ -262,7 +262,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: fire-tv-latest
-          name: Fire TV Latest
+          
+name: Fire TV Latest
           body: Latest Metronome Fire TV APK
           files: metronome-fire-tv.apk
           overwrite_files: true
