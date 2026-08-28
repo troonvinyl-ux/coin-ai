@@ -26,6 +26,8 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URLDecoder;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -109,7 +111,6 @@ public class MainActivity extends Activity {
             image.setVisibility(View.GONE);
             info.setVisibility(View.GONE);
             web.setVisibility(View.VISIBLE);
-
             web.loadUrl(url);
         });
     }
@@ -158,9 +159,6 @@ public class MainActivity extends Activity {
         return super.onKeyDown(key, event);
     }
 
-    /*
-     * Simple HTTP server used by the iPhone.
-     */
     class HttpServer implements Runnable {
 
         private final int port;
@@ -175,9 +173,6 @@ public class MainActivity extends Activity {
 
             try {
 
-                /*
-                 * Explicitly bind to every network interface.
-                 */
                 serverSocket = new ServerSocket(
                         port,
                         50,
@@ -191,23 +186,21 @@ public class MainActivity extends Activity {
                     Socket socket = serverSocket.accept();
 
                     socket.setKeepAlive(false);
-                    socket.setSoTimeout(30000);
+                    socket.setSoTimeout(60000);
 
                     pool.execute(() -> handle(socket));
                 }
 
             } catch (Exception e) {
 
-                /*
-                 * Show the server error on the TV instead of
-                 * silently failing.
-                 */
-                runOnUiThread(() -> {
-                    address.setText(
-                            "SERVER ERROR: " + e.getClass().getSimpleName()
-                                    + " - " + e.getMessage()
-                    );
-                });
+                runOnUiThread(() ->
+                        address.setText(
+                                "SERVER ERROR: "
+                                        + e.getClass().getSimpleName()
+                                        + " - "
+                                        + e.getMessage()
+                        )
+                );
             }
         }
 
@@ -266,7 +259,7 @@ public class MainActivity extends Activity {
                 String method = parts[0];
                 String path = parts[1];
 
-                int contentLength = 0;
+                Map<String, String> headers = new HashMap<>();
 
                 String line;
 
@@ -276,45 +269,26 @@ public class MainActivity extends Activity {
                         break;
                     }
 
-                    String lower = line.toLowerCase();
+                    int colon = line.indexOf(':');
 
-                    if (lower.startsWith("content-length:")) {
+                    if (colon > 0) {
 
-                        try {
-                            contentLength = Integer.parseInt(
-                                    line.substring(15).trim()
-                            );
-                        } catch (Exception ignored) {
-                            contentLength = 0;
-                        }
+                        String key =
+                                line.substring(0, colon)
+                                        .trim()
+                                        .toLowerCase();
+
+                        String value =
+                                line.substring(colon + 1)
+                                        .trim();
+
+                        headers.put(key, value);
                     }
-                }
-
-                byte[] body = new byte[contentLength];
-
-                int received = 0;
-
-                while (received < contentLength) {
-
-                    int read = input.read(
-                            body,
-                            received,
-                            contentLength - received
-                    );
-
-                    if (read < 0) {
-                        break;
-                    }
-
-                    received += read;
                 }
 
                 OutputStream output =
                         socket.getOutputStream();
 
-                /*
-                 * CORS pre-flight.
-                 */
                 if ("OPTIONS".equalsIgnoreCase(method)) {
 
                     send(
@@ -328,15 +302,6 @@ public class MainActivity extends Activity {
                     return;
                 }
 
-                /*
-                 * Health check.
-                 *
-                 * Opening:
-                 * http://TV-IP:8080/health
-                 *
-                 * should return:
-                 * OK
-                 */
                 if ("GET".equalsIgnoreCase(method)
                         && path.equals("/health")) {
 
@@ -351,9 +316,6 @@ public class MainActivity extends Activity {
                     return;
                 }
 
-                /*
-                 * Main iPhone control page.
-                 */
                 if ("GET".equalsIgnoreCase(method)
                         && path.equals("/")) {
 
@@ -369,10 +331,47 @@ public class MainActivity extends Activity {
                 }
 
                 /*
-                 * Upload image.
+                 * IMAGE UPLOAD
+                 *
+                 * Supports:
+                 * 1. Content-Length uploads
+                 * 2. Transfer-Encoding: chunked
                  */
                 if ("POST".equalsIgnoreCase(method)
                         && path.startsWith("/upload")) {
+
+                    byte[] body;
+
+                    String transferEncoding =
+                            headers.get("transfer-encoding");
+
+                    String contentLength =
+                            headers.get("content-length");
+
+                    if (transferEncoding != null
+                            && transferEncoding.toLowerCase()
+                            .contains("chunked")) {
+
+                        body = readChunkedBody(input);
+
+                    } else if (contentLength != null) {
+
+                        int length =
+                                Integer.parseInt(contentLength);
+
+                        body = readFixedBody(
+                                input,
+                                length
+                        );
+
+                    } else {
+
+                        /*
+                         * No length information.
+                         * Read until the connection closes.
+                         */
+                        body = readUntilClose(input);
+                    }
 
                     String name = "image";
 
@@ -380,10 +379,35 @@ public class MainActivity extends Activity {
 
                     if (query >= 0) {
 
+                        String encoded =
+                                path.substring(query + 5);
+
+                        int amp =
+                                encoded.indexOf('&');
+
+                        if (amp >= 0) {
+                            encoded =
+                                    encoded.substring(0, amp);
+                        }
+
                         name = URLDecoder.decode(
-                                path.substring(query + 5),
+                                encoded,
                                 "UTF-8"
                         );
+                    }
+
+                    if (body.length == 0) {
+
+                        send(
+                                output,
+                                "400 Bad Request",
+                                "text/plain; charset=utf-8",
+                                "Empty upload"
+                                        .getBytes("UTF-8")
+                        );
+
+                        socket.close();
+                        return;
                     }
 
                     File file = new File(
@@ -397,6 +421,7 @@ public class MainActivity extends Activity {
                                  new FileOutputStream(file)) {
 
                         fos.write(body);
+                        fos.flush();
                     }
 
                     files.add(file);
@@ -415,9 +440,6 @@ public class MainActivity extends Activity {
                     return;
                 }
 
-                /*
-                 * Next image.
-                 */
                 if ("POST".equalsIgnoreCase(method)
                         && path.equals("/next")) {
 
@@ -434,9 +456,6 @@ public class MainActivity extends Activity {
                     return;
                 }
 
-                /*
-                 * Previous image.
-                 */
                 if ("POST".equalsIgnoreCase(method)
                         && path.equals("/prev")) {
 
@@ -453,9 +472,6 @@ public class MainActivity extends Activity {
                     return;
                 }
 
-                /*
-                 * Clear images.
-                 */
                 if ("POST".equalsIgnoreCase(method)
                         && path.equals("/clear")) {
 
@@ -472,14 +488,20 @@ public class MainActivity extends Activity {
                     return;
                 }
 
-                /*
-                 * Tell TV WebView to open a URL.
-                 */
                 if ("POST".equalsIgnoreCase(method)
                         && path.equals("/url")) {
 
+                    byte[] body =
+                            readRequestBody(
+                                    input,
+                                    headers
+                            );
+
                     String url =
-                            new String(body, "UTF-8").trim();
+                            new String(
+                                    body,
+                                    "UTF-8"
+                            ).trim();
 
                     showUrl(url);
 
@@ -494,9 +516,6 @@ public class MainActivity extends Activity {
                     return;
                 }
 
-                /*
-                 * Anything else.
-                 */
                 send(
                         output,
                         "404 Not Found",
@@ -515,10 +534,191 @@ public class MainActivity extends Activity {
             }
         }
 
-        private String readLine(InputStream input)
-                throws Exception {
+        private byte[] readRequestBody(
+                InputStream input,
+                Map<String, String> headers
+        ) throws Exception {
 
-            StringBuilder result = new StringBuilder();
+            String transferEncoding =
+                    headers.get("transfer-encoding");
+
+            if (transferEncoding != null
+                    && transferEncoding.toLowerCase()
+                    .contains("chunked")) {
+
+                return readChunkedBody(input);
+            }
+
+            String contentLength =
+                    headers.get("content-length");
+
+            if (contentLength != null) {
+
+                return readFixedBody(
+                        input,
+                        Integer.parseInt(contentLength)
+                );
+            }
+
+            return readUntilClose(input);
+        }
+
+        private byte[] readFixedBody(
+                InputStream input,
+                int length
+        ) throws Exception {
+
+            ByteArrayOutputStream output =
+                    new ByteArrayOutputStream(length);
+
+            byte[] buffer = new byte[8192];
+
+            int remaining = length;
+
+            while (remaining > 0) {
+
+                int read = input.read(
+                        buffer,
+                        0,
+                        Math.min(
+                                buffer.length,
+                                remaining
+                        )
+                );
+
+                if (read < 0) {
+                    break;
+                }
+
+                output.write(buffer, 0, read);
+
+                remaining -= read;
+            }
+
+            return output.toByteArray();
+        }
+
+        private byte[] readChunkedBody(
+                InputStream input
+        ) throws Exception {
+
+            ByteArrayOutputStream output =
+                    new ByteArrayOutputStream();
+
+            while (true) {
+
+                String sizeLine =
+                        readLine(input);
+
+                if (sizeLine == null) {
+                    break;
+                }
+
+                sizeLine = sizeLine.trim();
+
+                int semicolon =
+                        sizeLine.indexOf(';');
+
+                if (semicolon >= 0) {
+                    sizeLine =
+                            sizeLine.substring(
+                                    0,
+                                    semicolon
+                            );
+                }
+
+                int size =
+                        Integer.parseInt(
+                                sizeLine.trim(),
+                                16
+                        );
+
+                if (size == 0) {
+
+                    /*
+                     * Consume trailing headers.
+                     */
+                    while (true) {
+
+                        String trailer =
+                                readLine(input);
+
+                        if (trailer == null
+                                || trailer.isEmpty()) {
+                            break;
+                        }
+                    }
+
+                    break;
+                }
+
+                byte[] chunk =
+                        new byte[size];
+
+                int received = 0;
+
+                while (received < size) {
+
+                    int read =
+                            input.read(
+                                    chunk,
+                                    received,
+                                    size - received
+                            );
+
+                    if (read < 0) {
+                        throw new Exception(
+                                "Unexpected end of chunk"
+                        );
+                    }
+
+                    received += read;
+                }
+
+                output.write(
+                        chunk,
+                        0,
+                        size
+                );
+
+                /*
+                 * Consume CRLF after chunk.
+                 */
+                readLine(input);
+            }
+
+            return output.toByteArray();
+        }
+
+        private byte[] readUntilClose(
+                InputStream input
+        ) throws Exception {
+
+            ByteArrayOutputStream output =
+                    new ByteArrayOutputStream();
+
+            byte[] buffer = new byte[8192];
+
+            int read;
+
+            while ((read = input.read(buffer)) != -1) {
+
+                output.write(
+                        buffer,
+                        0,
+                        read
+                );
+            }
+
+            return output.toByteArray();
+        }
+
+        private String readLine(
+                InputStream input
+        ) throws Exception {
+
+            StringBuilder result =
+                    new StringBuilder();
 
             int c;
 
@@ -533,7 +733,9 @@ public class MainActivity extends Activity {
                 }
             }
 
-            if (c == -1 && result.length() == 0) {
+            if (c == -1
+                    && result.length() == 0) {
+
                 return null;
             }
 
@@ -605,18 +807,38 @@ public class MainActivity extends Activity {
                     "<script>" +
 
                     "async function send(){" +
-                    "for(const file of document.getElementById('f').files)" +
-                    "await fetch('/upload?name='+encodeURIComponent(file.name)," +
+
+                    "const picker=document.getElementById('f');" +
+
+                    "for(const file of picker.files){" +
+
+                    "const response=await fetch(" +
+                    "'/upload?name='+encodeURIComponent(file.name)," +
                     "{method:'POST'," +
-                    "headers:{'Content-Type':file.type}," +
-                    "body:file});" +
+                    "headers:{'Content-Type':file.type||'application/octet-stream'}," +
+                    "body:file}" +
+                    ");" +
+
+                    "if(!response.ok){" +
+                    "alert('Upload failed: '+await response.text());" +
+                    "return;" +
+                    "}" +
+
+                    "}" +
+
                     "}" +
 
                     "async function url(){" +
+
+                    "const value=document.getElementById('u').value.trim();" +
+
+                    "if(!value)return;" +
+
                     "await fetch('/url'," +
                     "{method:'POST'," +
                     "headers:{'Content-Type':'text/plain'}," +
-                    "body:document.getElementById('u').value});" +
+                    "body:value});" +
+
                     "}" +
 
                     "</script>" +
