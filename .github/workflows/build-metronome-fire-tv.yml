@@ -1,0 +1,254 @@
+name: Build Metronome Fire TV APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Create Android project
+        run: |
+          rm -rf firetv-build
+          mkdir -p firetv-build/app/src/main/java/com/keenoncoins/metronome
+          mkdir -p firetv-build/app/src/main/assets
+          mkdir -p firetv-build/app/src/main/res/values
+          mkdir -p firetv-build/app/src/main/res/drawable
+
+          test -f apps/metronome/index.html
+          cp apps/metronome/index.html firetv-build/app/src/main/assets/index.html
+          cp apps/metronome/manifest.webmanifest firetv-build/app/src/main/assets/manifest.webmanifest 2>/dev/null || true
+
+          cat > firetv-build/settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.name = "MetronomeFireTV"
+          include(":app")
+          EOF
+
+          cat > firetv-build/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.7.3' apply false
+          }
+          EOF
+
+          cat > firetv-build/app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.keenoncoins.metronome'
+              compileSdk 35
+
+              defaultConfig {
+                  applicationId 'com.keenoncoins.metronome'
+                  minSdk 23
+                  targetSdk 28
+                  versionCode 1
+                  versionName '1.0'
+              }
+          }
+          EOF
+
+          cat > firetv-build/app/src/main/res/values/strings.xml <<'EOF'
+          <resources>
+              <string name="app_name">Metronome Video</string>
+          </resources>
+          EOF
+
+          cat > firetv-build/app/src/main/res/values/styles.xml <<'EOF'
+          <resources>
+              <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:windowFullscreen">true</item>
+                  <item name="android:colorAccent">#ffffff</item>
+                  <item name="android:navigationBarColor">#090b10</item>
+                  <item name="android:statusBarColor">#090b10</item>
+                  <item name="android:windowActionModeOverlay">true</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > firetv-build/app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-feature
+                  android:name="android.software.leanback"
+                  android:required="false" />
+
+              <uses-feature
+                  android:name="android.hardware.touchscreen"
+                  android:required="false" />
+
+              <uses-permission android:name="android.permission.INTERNET" />
+
+              <application
+                  android:theme="@style/AppTheme"
+                  android:label="@string/app_name"
+                  android:usesCleartextTraffic="true"
+                  android:hardwareAccelerated="true"
+                  android:resizeableActivity="false">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:screenOrientation="landscape"
+                      android:exported="true">
+
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                          <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                      </intent-filter>
+
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > firetv-build/app/src/main/java/com/keenoncoins/metronome/MainActivity.java <<'EOF'
+          package com.keenoncoins.metronome;
+
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.view.KeyEvent;
+          import android.view.View;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+
+          public class MainActivity extends Activity {
+              private WebView web;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  getWindow().setFlags(
+                      android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                      android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN
+                  );
+
+                  web = new WebView(this);
+                  web.setFocusable(true);
+                  web.setFocusableInTouchMode(true);
+                  web.requestFocus(View.FOCUS_DOWN);
+
+                  WebSettings s = web.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  s.setDatabaseEnabled(true);
+                  s.setMediaPlaybackRequiresUserGesture(false);
+                  s.setAllowFileAccess(true);
+                  s.setAllowContentAccess(true);
+                  s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+                  s.setBuiltInZoomControls(false);
+                  s.setDisplayZoomControls(false);
+
+                  web.setWebViewClient(new WebViewClient() {
+                      @Override
+                      public boolean shouldOverrideUrlLoading(
+                              WebView view, WebResourceRequest request) {
+                          return false;
+                      }
+
+                      @Override
+                      public boolean shouldOverrideUrlLoading(
+                              WebView view, String url) {
+                          return false;
+                      }
+                  });
+
+                  web.setWebChromeClient(new WebChromeClient());
+
+                  web.loadUrl("file:///android_asset/index.html");
+                  setContentView(web);
+              }
+
+              @Override
+              public boolean dispatchKeyEvent(KeyEvent event) {
+                  if (web != null && event.getAction() == KeyEvent.ACTION_DOWN) {
+                      web.requestFocus();
+                  }
+                  return super.dispatchKeyEvent(event);
+              }
+
+              @Override
+              public void onBackPressed() {
+                  if (web != null && web.canGoBack()) {
+                      web.goBack();
+                  } else {
+                      super.onBackPressed();
+                  }
+              }
+
+              @Override
+              protected void onDestroy() {
+                  if (web != null) {
+                      web.stopLoading();
+                      web.destroy();
+                      web = null;
+                  }
+                  super.onDestroy();
+              }
+          }
+          EOF
+
+      - name: Install Gradle
+        run: |
+          curl -L --fail -o gradle.zip https://services.gradle.org/distributions/gradle-8.10.2-bin.zip
+          unzip -q gradle.zip
+          echo "$PWD/gradle-8.10.2/bin" >> "$GITHUB_PATH"
+
+      - name: Build Fire TV APK
+        working-directory: firetv-build
+        run: gradle --no-daemon --stacktrace assembleDebug
+
+      - name: Prepare APK
+        run: |
+          cp firetv-build/app/build/outputs/apk/debug/app-debug.apk metronome-fire-tv.apk
+          ls -lh metronome-fire-tv.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: metronome-fire-tv-apk
+          path: metronome-fire-tv.apk
+          if-no-files-found: error
