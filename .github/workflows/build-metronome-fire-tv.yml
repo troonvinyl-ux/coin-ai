@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -23,7 +23,7 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK packages
+      - name: Install Android build tools
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-35" "build-tools;35.0.0"
@@ -31,14 +31,18 @@ jobs:
       - name: Create Android project
         run: |
           rm -rf firetv-build
+
           mkdir -p firetv-build/app/src/main/java/com/keenoncoins/metronome
           mkdir -p firetv-build/app/src/main/assets
           mkdir -p firetv-build/app/src/main/res/values
-          mkdir -p firetv-build/app/src/main/res/drawable
 
           test -f apps/metronome/index.html
-          cp apps/metronome/index.html firetv-build/app/src/main/assets/index.html
-          cp apps/metronome/manifest.webmanifest firetv-build/app/src/main/assets/manifest.webmanifest 2>/dev/null || true
+
+          cp apps/metronome/index.html \
+            firetv-build/app/src/main/assets/index.html
+
+          cp apps/metronome/manifest.webmanifest \
+            firetv-build/app/src/main/assets/manifest.webmanifest 2>/dev/null || true
 
           cat > firetv-build/settings.gradle <<'EOF'
           pluginManagement {
@@ -79,7 +83,7 @@ jobs:
               defaultConfig {
                   applicationId 'com.keenoncoins.metronome'
                   minSdk 23
-                  targetSdk 28
+                  targetSdk 35
                   versionCode 1
                   versionName '1.0'
               }
@@ -94,13 +98,13 @@ jobs:
 
           cat > firetv-build/app/src/main/res/values/styles.xml <<'EOF'
           <resources>
-              <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
+              <style name="AppTheme"
+                  parent="android:style/Theme.Material.NoActionBar">
                   <item name="android:fontFamily">sans</item>
                   <item name="android:windowFullscreen">true</item>
                   <item name="android:colorAccent">#ffffff</item>
                   <item name="android:navigationBarColor">#090b10</item>
                   <item name="android:statusBarColor">#090b10</item>
-                  <item name="android:windowActionModeOverlay">true</item>
               </style>
           </resources>
           EOF
@@ -116,7 +120,8 @@ jobs:
                   android:name="android.hardware.touchscreen"
                   android:required="false" />
 
-              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission
+                  android:name="android.permission.INTERNET" />
 
               <application
                   android:theme="@style/AppTheme"
@@ -149,12 +154,12 @@ jobs:
           import android.view.KeyEvent;
           import android.view.View;
           import android.webkit.WebChromeClient;
-          import android.webkit.WebResourceRequest;
           import android.webkit.WebSettings;
           import android.webkit.WebView;
           import android.webkit.WebViewClient;
 
           public class MainActivity extends Activity {
+
               private WebView web;
 
               @Override
@@ -167,46 +172,38 @@ jobs:
                   );
 
                   web = new WebView(this);
+
                   web.setFocusable(true);
                   web.setFocusableInTouchMode(true);
                   web.requestFocus(View.FOCUS_DOWN);
 
                   WebSettings s = web.getSettings();
+
                   s.setJavaScriptEnabled(true);
                   s.setDomStorageEnabled(true);
                   s.setDatabaseEnabled(true);
                   s.setMediaPlaybackRequiresUserGesture(false);
                   s.setAllowFileAccess(true);
                   s.setAllowContentAccess(true);
-                  s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-                  s.setBuiltInZoomControls(false);
-                  s.setDisplayZoomControls(false);
+                  s.setMixedContentMode(
+                      WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                  );
 
-                  web.setWebViewClient(new WebViewClient() {
-                      @Override
-                      public boolean shouldOverrideUrlLoading(
-                              WebView view, WebResourceRequest request) {
-                          return false;
-                      }
-
-                      @Override
-                      public boolean shouldOverrideUrlLoading(
-                              WebView view, String url) {
-                          return false;
-                      }
-                  });
-
+                  web.setWebViewClient(new WebViewClient());
                   web.setWebChromeClient(new WebChromeClient());
 
                   web.loadUrl("file:///android_asset/index.html");
+
                   setContentView(web);
               }
 
               @Override
               public boolean dispatchKeyEvent(KeyEvent event) {
-                  if (web != null && event.getAction() == KeyEvent.ACTION_DOWN) {
+                  if (web != null &&
+                      event.getAction() == KeyEvent.ACTION_DOWN) {
                       web.requestFocus();
                   }
+
                   return super.dispatchKeyEvent(event);
               }
 
@@ -226,6 +223,7 @@ jobs:
                       web.destroy();
                       web = null;
                   }
+
                   super.onDestroy();
               }
           }
@@ -233,22 +231,41 @@ jobs:
 
       - name: Install Gradle
         run: |
-          curl -L --fail -o gradle.zip https://services.gradle.org/distributions/gradle-8.10.2-bin.zip
+          curl -L --fail \
+            -o gradle.zip \
+            https://services.gradle.org/distributions/gradle-8.10.2-bin.zip
+
           unzip -q gradle.zip
+
           echo "$PWD/gradle-8.10.2/bin" >> "$GITHUB_PATH"
 
-      - name: Build Fire TV APK
+      - name: Build APK
         working-directory: firetv-build
-        run: gradle --no-daemon --stacktrace assembleDebug
+        run: |
+          gradle --no-daemon --stacktrace assembleDebug
 
       - name: Prepare APK
         run: |
-          cp firetv-build/app/build/outputs/apk/debug/app-debug.apk metronome-fire-tv.apk
+          cp \
+            firetv-build/app/build/outputs/apk/debug/app-debug.apk \
+            metronome-fire-tv.apk
+
           ls -lh metronome-fire-tv.apk
 
-      - name: Upload APK
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: metronome-fire-tv-apk
           path: metronome-fire-tv.apk
-          if-no-files-found: error
+
+      - name: Publish public Downloader APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: fire-tv-latest
+          name: Fire TV Latest
+          body: Latest Metronome Fire TV APK
+          files: metronome-fire-tv.apk
+          overwrite_files: true
+          make_latest: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
