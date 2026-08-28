@@ -1,0 +1,288 @@
+name: Build Metronome Fire TV APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Create Fire TV Android project
+        run: |
+          rm -rf firetv-build
+          mkdir -p firetv-build/app/src/main/java/com/keenoncoins/metronome
+          mkdir -p firetv-build/app/src/main/assets
+          mkdir -p firetv-build/app/src/main/res/values
+
+          cat > firetv-build/settings.gradle <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement {
+            repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+            repositories { google(); mavenCentral() }
+          }
+          rootProject.name = "MetronomeFireTV"
+          include ":app"
+          EOF
+
+          cat > firetv-build/build.gradle <<'EOF'
+          plugins {
+            id 'com.android.application' version '8.7.3' apply false
+          }
+          EOF
+
+          cat > firetv-build/app/build.gradle <<'EOF'
+          plugins { id 'com.android.application' }
+
+          android {
+            namespace 'com.keenoncoins.metronome'
+            compileSdk 35
+
+            defaultConfig {
+              applicationId 'com.keenoncoins.metronome'
+              minSdk 23
+              targetSdk 35
+              versionCode 1
+              versionName '1.0'
+            }
+          }
+          EOF
+
+          cat > firetv-build/app/src/main/res/values/strings.xml <<'EOF'
+          <resources>
+            <string name="app_name">Metronome Video</string>
+          </resources>
+          EOF
+
+          cat > firetv-build/app/src/main/res/values/styles.xml <<'EOF'
+          <resources>
+            <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
+              <item name="android:windowFullscreen">true</item>
+              <item name="android:fontFamily">sans</item>
+            </style>
+          </resources>
+          EOF
+
+          cat > firetv-build/app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <uses-permission android:name="android.permission.INTERNET"/>
+            <uses-feature android:name="android.software.leanback" android:required="false"/>
+
+            <application
+              android:theme="@style/AppTheme"
+              android:label="@string/app_name"
+              android:usesCleartextTraffic="true"
+              android:hardwareAccelerated="true">
+
+              <activity
+                android:name=".MainActivity"
+                android:screenOrientation="landscape"
+                android:exported="true">
+
+                <intent-filter>
+                  <action android:name="android.intent.action.MAIN"/>
+                  <category android:name="android.intent.category.LAUNCHER"/>
+                  <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>
+                </intent-filter>
+
+              </activity>
+            </application>
+          </manifest>
+          EOF
+
+          cat > firetv-build/app/src/main/java/com/keenoncoins/metronome/MainActivity.java <<'EOF'
+          package com.keenoncoins.metronome;
+
+          import android.app.Activity;
+          import android.os.Bundle;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+
+          public class MainActivity extends Activity {
+            @Override
+            public void onCreate(Bundle savedInstanceState) {
+              super.onCreate(savedInstanceState);
+
+              WebView web = new WebView(this);
+              WebSettings settings = web.getSettings();
+
+              settings.setJavaScriptEnabled(true);
+              settings.setDomStorageEnabled(true);
+              settings.setMediaPlaybackRequiresUserGesture(false);
+              settings.setAllowFileAccess(true);
+              settings.setAllowContentAccess(true);
+              settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+
+              web.setWebViewClient(new WebViewClient());
+              web.setWebChromeClient(new WebChromeClient());
+              web.loadUrl("file:///android_asset/index.html");
+
+              setContentView(web);
+            }
+          }
+          EOF
+
+          cat > firetv-build/app/src/main/assets/index.html <<'EOF'
+          <!doctype html>
+          <html lang="en">
+          <head>
+          <meta name="viewport" content="width=device-width,initial-scale=1">
+          <title>Metronome Video</title>
+          <style>
+          body{margin:0;background:#090b10;color:#fff;font:20px sans-serif;text-align:center}
+          main{padding:25px}
+          video{width:100%;max-height:55vh;background:#000}
+          .beat{font-size:100px;font-weight:bold}
+          button,input{font-size:20px;padding:12px;margin:6px;border-radius:10px}
+          input{width:80%}
+          </style>
+          </head>
+          <body>
+          <main>
+          <h1>METRONOME VIDEO</h1>
+          <video id="v" controls playsinline></video>
+          <div id="b" class="beat">1</div>
+          <div id="t">120 BPM</div>
+          <input id="r" type="range" min="30" max="240" value="120"><br>
+          <button id="s">Start</button>
+          <button id="m">-5</button>
+          <button id="p">+5</button>
+          <button id="tt">Tap Tempo</button><br>
+          <input id="u" placeholder="Direct video URL">
+          <button id="l">Load</button>
+
+          <script>
+          let bpm=+(localStorage.bpm||120),running=false,timer,n=0,audio,gain,taps=[];
+          const $=id=>document.getElementById(id);
+
+          function render(){
+            $("r").value=bpm;
+            $("t").textContent=bpm+" BPM";
+            localStorage.bpm=bpm;
+          }
+
+          function initAudio(){
+            if(!audio){
+              audio=new(window.AudioContext||window.webkitAudioContext)();
+              gain=audio.createGain();
+              gain.connect(audio.destination);
+            }
+            if(audio.state==="suspended") audio.resume();
+          }
+
+          function beat(){
+            n=n%4+1;
+            $("b").textContent=n;
+            initAudio();
+
+            const osc=audio.createOscillator();
+            const g=audio.createGain();
+
+            osc.frequency.value=n===1?1100:700;
+            g.gain.setValueAtTime(.001,audio.currentTime);
+            g.gain.exponentialRampToValueAtTime(.7,audio.currentTime+.004);
+            g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+.06);
+
+            osc.connect(g).connect(gain);
+            osc.start();
+            osc.stop(audio.currentTime+.07);
+          }
+
+          function setBpm(value){
+            bpm=Math.max(30,Math.min(240,Math.round(value)));
+            render();
+
+            if(running){
+              clearInterval(timer);
+              timer=setInterval(beat,60000/bpm);
+            }
+          }
+
+          $("r").oninput=e=>setBpm(e.target.value);
+          $("m").onclick=()=>setBpm(bpm-5);
+          $("p").onclick=()=>setBpm(bpm+5);
+
+          $("s").onclick=()=>{
+            initAudio();
+            running=!running;
+            $("s").textContent=running?"Stop":"Start";
+
+            if(running){
+              n=0;
+              beat();
+              timer=setInterval(beat,60000/bpm);
+            }else{
+              clearInterval(timer);
+            }
+          };
+
+          $("l").onclick=()=>{
+            const url=$("u").value.trim();
+            if(!url)return;
+            $("v").src=url;
+            $("v").load();
+            $("v").play().catch(()=>{});
+          };
+
+          $("tt").onclick=()=>{
+            const now=performance.now();
+            taps=taps.filter(x=>now-x<2500);
+            taps.push(now);
+
+            if(taps.length>1){
+              const interval=(taps[taps.length-1]-taps[0])/(taps.length-1);
+              setBpm(60000/interval);
+            }
+
+            if(taps.length>=6)taps=[];
+          };
+
+          render();
+          </script>
+          </main>
+          </body>
+          </html>
+          EOF
+
+      - name: Install Gradle
+        run: |
+          curl -fsSL -o gradle.zip https://services.gradle.org/distributions/gradle-8.10.2-bin.zip
+          unzip -q gradle.zip
+          echo "$PWD/gradle-8.10.2/bin" >> "$GITHUB_PATH"
+
+      - name: Build APK
+        working-directory: firetv-build
+        run: gradle --no-daemon assembleDebug
+
+      - name: Verify APK
+        run: |
+          test -f firetv-build/app/build/outputs/apk/debug/app-debug.apk
+          file firetv-build/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload Fire TV APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: metronome-fire-tv-apk
+          path: firetv-build/app/build/outputs/apk/debug/app-debug.apk
