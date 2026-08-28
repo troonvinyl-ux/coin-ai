@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -35,8 +35,14 @@ jobs:
       - name: Build APK
         run: gradle assembleDebug
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/*.apk app/build/outputs/apk/debug/coin-ai-tv.apk
+
+      - name: Publish APK Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: iPhone-Share-TV-APK
-          path: apps/iphone-share-tv/app/build/outputs/apk/debug/*.apk
+          tag_name: tv-latest
+          name: Coin AI TV Latest
+          prerelease: false
+          make_latest: true
+          files: apps/iphone-share-tv/app/build/outputs/apk/debug/coin-ai-tv.apk
