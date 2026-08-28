@@ -1,0 +1,537 @@
+name: Build Metronome Fire TV APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Create Android project
+        run: |
+          rm -rf firetv-build
+          mkdir -p firetv-build/app/src/main/java/com/keenoncoins/metronome
+          mkdir -p firetv-build/app/src/main/assets
+          mkdir -p firetv-build/app/src/main/res/values
+          mkdir -p firetv-build/app/src/main/res/drawable
+
+          cat > firetv-build/app/src/main/assets/index.html <<'HTML'
+          <!doctype html>
+          <html lang="en">
+          <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+          <title>Fire TV Web App</title>
+          <style>
+          :root{--bg:#0b0d10;--panel:#151920;--text:#f5f7fa;--muted:#9da6b2;--accent:#5ee1a2;--danger:#ff6978}
+          *{box-sizing:border-box}
+          body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,sans-serif;min-height:100vh}
+          .app{max-width:1000px;margin:auto;padding:34px 36px 50px}
+          h1{font-size:38px;margin:0 0 8px}.sub{color:var(--muted);font-size:18px;margin-bottom:24px}
+          .card{background:var(--panel);border-radius:20px;padding:24px;margin:16px 0}
+          label{display:block;font-size:19px;font-weight:700;margin-bottom:12px}
+          input[type=text],input[type=url]{width:100%;background:#0e1116;border:2px solid #343c47;color:white;border-radius:12px;padding:17px;font-size:21px}
+          input:focus,button:focus{outline:4px solid #fff;outline-offset:3px}
+          button{border:0;border-radius:13px;padding:16px 22px;font-size:18px;font-weight:700;background:#262d36;color:white;min-height:60px}
+          button.primary{background:var(--accent);color:#07120c}
+          button.danger{background:var(--danger);color:#190509}
+          .row{display:flex;gap:12px;margin-top:14px;flex-wrap:wrap}
+          .row button{flex:1;min-width:180px}
+          .status{margin-top:16px;padding:14px;border-radius:12px;background:#0e1116;color:var(--muted);font-size:16px;word-break:break-all}
+          .saved{color:var(--accent)}
+          video{display:block;width:100%;max-height:58vh;background:#000;border-radius:14px;margin-top:16px}
+          .hint{font-size:14px;color:var(--muted);line-height:1.5;margin-top:12px}
+          .hidden{display:none}
+          </style>
+          </head>
+          <body>
+          <div class="app">
+            <h1>Fire TV Web App</h1>
+            <div class="sub">Enter a website URL or choose a video to play.</div>
+
+            <div class="card">
+              <label for="url">Website URL</label>
+              <input id="url" type="url" inputmode="url" autocomplete="off"
+                     placeholder="https://example.com" tabindex="0">
+              <div class="row">
+                <button id="saveOpen" class="primary" tabindex="0">Save &amp; Open URL</button>
+                <button id="openSaved" tabindex="0">Open Saved URL</button>
+              </div>
+              <div class="row">
+                <button id="clearUrl" class="danger" tabindex="0">Clear Saved URL</button>
+              </div>
+              <div id="status" class="status">No URL saved.</div>
+              <div class="hint">Focus the URL box and use the Fire TV keyboard to type. Enter saves and opens the address.</div>
+            </div>
+
+            <div class="card">
+              <label for="videoInput">Video</label>
+              <input id="videoInput" type="file" accept="video/*" tabindex="0">
+              <div class="row">
+                <button id="playVideo" class="primary" tabindex="0">Play Selected Video</button>
+                <button id="clearVideo" tabindex="0">Remove Video</button>
+              </div>
+              <video id="video" class="hidden" controls playsinline></video>
+              <div id="videoStatus" class="status">No video selected.</div>
+              <div class="hint">Choose a video with the Fire TV file picker, then select Play Selected Video.</div>
+            </div>
+          </div>
+
+          <script>
+          const $=id=>document.getElementById(id);
+          const URL_KEY="firetv_saved_url";
+          let videoObjectUrl="";
+
+          function normalise(value){
+            value=(value||"").trim();
+            if(!value)return "";
+            if(!/^https?:\/\//i.test(value))value="https://"+value;
+            try{
+              const u=new URL(value);
+              return (u.protocol==="http:"||u.protocol==="https:")?u.href:"";
+            }catch(e){return "";}
+          }
+
+          function savedUrl(){return localStorage.getItem(URL_KEY)||"";}
+
+          function showUrlStatus(message){
+            $("status").textContent=message;
+            $("status").className=message.startsWith("Saved URL:")?"status saved":"status";
+          }
+
+          function refreshUrl(){
+            const v=savedUrl();
+            $("url").value=v;
+            showUrlStatus(v?"Saved URL: "+v:"No URL saved.");
+          }
+
+          function saveUrl(){
+            const v=normalise($("url").value);
+            if(!v){
+              showUrlStatus("Please enter a valid website address.");
+              $("url").focus();
+              return "";
+            }
+            localStorage.setItem(URL_KEY,v);
+            refreshUrl();
+            return v;
+          }
+
+          $("saveOpen").onclick=()=>{
+            const v=saveUrl();
+            if(v) window.location.href=v;
+          };
+
+          $("openSaved").onclick=()=>{
+            const v=savedUrl();
+            if(v) window.location.href=v;
+            else $("url").focus();
+          };
+
+          $("clearUrl").onclick=()=>{
+            localStorage.removeItem(URL_KEY);
+            refreshUrl();
+            $("url").focus();
+          };
+
+          $("url").addEventListener("keydown",e=>{
+            if(e.key==="Enter"){
+              e.preventDefault();
+              $("saveOpen").click();
+            }
+          });
+
+          $("videoInput").addEventListener("change",e=>{
+            const file=e.target.files && e.target.files[0];
+            if(!file)return;
+            if(videoObjectUrl)URL.revokeObjectURL(videoObjectUrl);
+            videoObjectUrl=URL.createObjectURL(file);
+            $("video").src=videoObjectUrl;
+            $("video").classList.remove("hidden");
+            $("videoStatus").textContent="Selected: "+file.name;
+          });
+
+          $("playVideo").onclick=()=>{
+            const v=$("video");
+            if(!v.src){
+              $("videoStatus").textContent="Select a video first.";
+              $("videoInput").focus();
+              return;
+            }
+            v.play().catch(()=>{});
+          };
+
+          $("clearVideo").onclick=()=>{
+            const v=$("video");
+            v.pause();
+            v.removeAttribute("src");
+            v.load();
+            if(videoObjectUrl)URL.revokeObjectURL(videoObjectUrl);
+            videoObjectUrl="";
+            $("videoInput").value="";
+            $("video").classList.add("hidden");
+            $("videoStatus").textContent="No video selected.";
+          };
+
+          // Fire TV D-pad: build one ordered list of ALL interactive controls.
+          // Left/right/up/down moves through the complete list; OK activates buttons.
+          function controls(){
+            return Array.from(document.querySelectorAll("input,button")).filter(el=>{
+              const s=getComputedStyle(el);
+              return !el.disabled && s.display!=="none" && s.visibility!=="hidden";
+            });
+          }
+
+          let focusIndex=0;
+
+          function focusControl(index){
+            const a=controls();
+            if(!a.length)return;
+            focusIndex=(index+a.length)%a.length;
+            a[focusIndex].focus({preventScroll:false});
+          }
+
+          function syncFocus(){
+            const a=controls();
+            const i=a.indexOf(document.activeElement);
+            if(i>=0)focusIndex=i;
+          }
+
+          document.addEventListener("keydown",e=>{
+            const a=controls();
+            if(!a.length)return;
+            syncFocus();
+            const cur=document.activeElement;
+
+            if(e.key==="ArrowDown"||e.key==="ArrowRight"){
+              // Allow normal cursor movement while typing in the URL field.
+              if(cur && cur.tagName==="INPUT" && (cur.type==="url"||cur.type==="text") && e.key==="ArrowRight")return;
+              e.preventDefault();
+              focusControl(focusIndex+1);
+              return;
+            }
+
+            if(e.key==="ArrowUp"||e.key==="ArrowLeft"){
+              if(cur && cur.tagName==="INPUT" && (cur.type==="url"||cur.type==="text") && e.key==="ArrowLeft")return;
+              e.preventDefault();
+              focusControl(focusIndex-1);
+              return;
+            }
+
+            if((e.key==="Enter"||e.key===" ") && cur && cur.tagName==="BUTTON"){
+              e.preventDefault();
+              cur.click();
+            }
+          });
+
+          refreshUrl();
+
+          // Start on the URL box so the Fire TV keyboard can be used immediately.
+          setTimeout(()=>$("url").focus(),250);
+          </script>
+          </body>
+          </html>
+          HTML
+
+          cat > firetv-build/settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.name = "MetronomeFireTV"
+          include(":app")
+          EOF
+
+          cat > firetv-build/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.7.3' apply false
+          }
+          EOF
+
+          cat > firetv-build/app/build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application'
+          }
+
+          android {
+              namespace 'com.keenoncoins.metronome'
+              compileSdk 35
+
+              defaultConfig {
+                  applicationId 'com.keenoncoins.metronome'
+                  minSdk 23
+                  targetSdk 28
+                  versionCode 1
+                  versionName '1.0'
+              }
+          }
+          EOF
+
+          cat > firetv-build/app/src/main/res/values/strings.xml <<'EOF'
+          <resources>
+              <string name="app_name">Fire TV Web App</string>
+          </resources>
+          EOF
+
+          cat > firetv-build/app/src/main/res/values/styles.xml <<'EOF'
+          <resources>
+              <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+                  <item name="android:windowFullscreen">true</item>
+                  <item name="android:colorAccent">#ffffff</item>
+                  <item name="android:navigationBarColor">#090b10</item>
+                  <item name="android:statusBarColor">#090b10</item>
+                  <item name="android:windowActionModeOverlay">true</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > firetv-build/app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-feature
+                  android:name="android.software.leanback"
+                  android:required="false" />
+
+              <uses-feature
+                  android:name="android.hardware.touchscreen"
+                  android:required="false" />
+
+              <uses-permission android:name="android.permission.INTERNET" />
+
+              <application
+                  android:theme="@style/AppTheme"
+                  android:label="@string/app_name"
+                  android:usesCleartextTraffic="true"
+                  android:hardwareAccelerated="true"
+                  android:resizeableActivity="false">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:screenOrientation="landscape"
+                      android:exported="true">
+
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                          <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                      </intent-filter>
+
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > firetv-build/app/src/main/java/com/keenoncoins/metronome/MainActivity.java <<'EOF'
+          package com.keenoncoins.metronome;
+
+          import android.app.Activity;
+          import android.content.Intent;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.view.KeyEvent;
+          import android.view.View;
+          import android.webkit.ValueCallback;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.webkit.WebViewClient;
+
+          public class MainActivity extends Activity {
+              private static final int FILE_CHOOSER_REQUEST = 1001;
+              private WebView web;
+              private ValueCallback<Uri[]> filePathCallback;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+
+                  getWindow().setFlags(
+                      android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                      android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN
+                  );
+
+                  web = new WebView(this);
+                  web.setFocusable(true);
+                  web.setFocusableInTouchMode(true);
+                  web.setClickable(true);
+                  web.requestFocus(View.FOCUS_DOWN);
+
+                  WebSettings s = web.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  s.setDatabaseEnabled(true);
+                  s.setMediaPlaybackRequiresUserGesture(false);
+                  s.setAllowFileAccess(true);
+                  s.setAllowContentAccess(true);
+                  s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+                  s.setBuiltInZoomControls(false);
+                  s.setDisplayZoomControls(false);
+
+                  web.setWebViewClient(new WebViewClient() {
+                      @Override
+                      public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                          return false;
+                      }
+
+                      @Override
+                      public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                          return false;
+                      }
+                  });
+
+                  web.setWebChromeClient(new WebChromeClient() {
+                      @Override
+                      public boolean onShowFileChooser(
+                              WebView webView,
+                              ValueCallback<Uri[]> callback,
+                              FileChooserParams fileChooserParams) {
+
+                          if (filePathCallback != null) {
+                              filePathCallback.onReceiveValue(null);
+                          }
+
+                          filePathCallback = callback;
+
+                          Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                          intent.addCategory(Intent.CATEGORY_OPENABLE);
+                          intent.setType("video/*");
+                          intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false);
+
+                          try {
+                              startActivityForResult(intent, FILE_CHOOSER_REQUEST);
+                          } catch (Exception e) {
+                              filePathCallback = null;
+                              callback.onReceiveValue(null);
+                              return false;
+                          }
+
+                          return true;
+                      }
+                  });
+
+                  web.loadUrl("file:///android_asset/index.html");
+                  setContentView(web);
+              }
+
+              @Override
+              protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+                  super.onActivityResult(requestCode, resultCode, data);
+
+                  if (requestCode != FILE_CHOOSER_REQUEST) return;
+
+                  if (filePathCallback == null) return;
+
+                  Uri[] results = null;
+
+                  if (resultCode == RESULT_OK && data != null) {
+                      Uri uri = data.getData();
+                      if (uri != null) {
+                          results = new Uri[]{uri};
+                      }
+                  }
+
+                  filePathCallback.onReceiveValue(results);
+                  filePathCallback = null;
+              }
+
+              @Override
+              public boolean dispatchKeyEvent(KeyEvent event) {
+                  if (web != null && event.getAction() == KeyEvent.ACTION_DOWN) {
+                      web.requestFocus();
+                  }
+                  return super.dispatchKeyEvent(event);
+              }
+
+              @Override
+              public void onBackPressed() {
+                  if (web != null && web.canGoBack()) {
+                      web.goBack();
+                  } else {
+                      super.onBackPressed();
+                  }
+              }
+
+              @Override
+              protected void onDestroy() {
+                  if (filePathCallback != null) {
+                      filePathCallback.onReceiveValue(null);
+                      filePathCallback = null;
+                  }
+                  if (web != null) {
+                      web.stopLoading();
+                      web.destroy();
+                      web = null;
+                  }
+                  super.onDestroy();
+              }
+          }
+          EOF
+
+      - name: Install Gradle
+        run: |
+          curl -L --fail -o gradle.zip https://services.gradle.org/distributions/gradle-8.10.2-bin.zip
+          unzip -q gradle.zip
+          echo "$PWD/gradle-8.10.2/bin" >> "$GITHUB_PATH"
+
+      - name: Build Fire TV APK
+        working-directory: firetv-build
+        run: gradle --no-daemon --stacktrace assembleDebug
+
+      - name: Prepare APK
+        run: |
+          cp firetv-build/app/build/outputs/apk/debug/app-debug.apk metronome-fire-tv.apk
+          ls -lh metronome-fire-tv.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: metronome-fire-tv-apk
+          path: metronome-fire-tv.apk
+          if-no-files-found: error
+
+      - name: Publish public Downloader APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: fire-tv-latest
+          name: Fire TV Latest
+          body: Fire TV Web App APK with saved URL support
+          files: metronome-fire-tv.apk
+          overwrite_files: true
+          make_latest: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
