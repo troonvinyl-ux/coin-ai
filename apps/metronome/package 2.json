@@ -1,0 +1,9 @@
+{
+  "name": "metronome-video-gallery",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Generic gallery/media extractor with metronome video player",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
