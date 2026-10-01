@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>KeenOnCoins Silver Quick Add</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",Arial,sans-serif;background:#090b0f;color:#f5f7fb}
+*{box-sizing:border-box} body{margin:0;background:#090b0f} .wrap{max-width:760px;margin:auto;padding:18px 16px 80px}
+h1{font-size:28px;margin:8px 0 4px} .sub{color:#9da6b5;margin-bottom:18px}
+.card{background:#141820;border:1px solid #252b36;border-radius:18px;padding:16px;margin:12px 0}
+label{display:block;color:#aeb6c4;font-size:13px;font-weight:700;margin:12px 0 6px}
+input,textarea,select{width:100%;background:#0d1015;color:#fff;border:1px solid #303744;border-radius:11px;padding:12px;font-size:16px}
+textarea{min-height:90px} .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+button{border:0;border-radius:12px;padding:14px 16px;font-weight:800;font-size:15px;cursor:pointer}
+.primary{background:#315fbd;color:#fff;width:100%} .gold{background:#c9a227;color:#111;width:100%} .dark{background:#252b36;color:#fff;width:100%}
+.photos{display:grid;grid-template-columns:1fr 1fr;gap:10px} .photo{background:#0d1015;border:1px dashed #424a58;border-radius:14px;min-height:170px;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative}
+.photo img{width:100%;height:170px;object-fit:contain} .photo span{color:#707988;font-weight:800}
+.status{padding:11px 13px;border-radius:10px;background:#10141b;color:#b9c2d0;margin-top:10px;white-space:pre-wrap}
+.result h2{font-size:20px;margin:0 0 8px} .pill{display:inline-block;background:#263044;border-radius:99px;padding:5px 9px;margin:3px;font-size:12px}
+.price{font-size:32px;font-weight:900;margin:4px 0} .muted{color:#929baa} .warn{color:#f0c56b} .ok{color:#7ed69b}
+.hidden{display:none} .small{font-size:12px;color:#7f8999;line-height:1.4}
+@media(max-width:520px){.row{grid-template-columns:1fr}}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<noscript><div class="wrap"><div class="status warn">JavaScript is disabled. This app needs JavaScript enabled.</div></div></noscript>
+<div class="wrap">
+
+<div id="startupBanner" class="status" style="margin-bottom:12px">
+  Loading KeenOnCoins… If this message remains, the browser is not running this file as a web page.
+</div>
+<h1>KEENONCOINS</h1>
+<div class="sub">Silver Quick Add — conservative attribution / quick-sale valuation</div>
+
+<div class="card hidden" id="setup"></div>
+
+<div class="card" id="login">
+  <h2>Sign in</h2>
+  <input id="email" placeholder="SWISH email" autocomplete="username">
+  <input id="password" type="password" placeholder="SWISH password" autocomplete="current-password" style="margin-top:8px">
+  <button class="primary" onclick="login()" style="margin-top:10px">Sign in to your private SWISH account</button>
+</div>
+
+<div class="card hidden" id="app">
+  <div class="row">
+    <div><b>Silver batch</b><div class="muted" id="tenantName"></div></div>
+    <button class="dark" onclick="signout()">Sign out</button>
+  </div>
+
+  <div class="photos" style="margin-top:14px">
+    <div>
+      <div class="photo" id="obvPreview"><span>OBVERSE</span></div>
+      <input id="obv" type="file" accept="image/*" capture="environment" onchange="preview(this,'obvPreview')">
+    </div>
+    <div>
+      <div class="photo" id="revPreview"><span>REVERSE</span></div>
+      <input id="rev" type="file" accept="image/*" capture="environment" onchange="preview(this,'revPreview')">
+    </div>
+  </div>
+
+  <div class="row">
+    <div><label>Weight (g)</label><input id="weight" inputmode="decimal" placeholder="e.g. 7.78"></div>
+    <div><label>Diameter (mm)</label><input id="diameter" inputmode="decimal" placeholder="e.g. 23"></div>
+  </div>
+  <div class="row">
+    <div><label>Metal</label><select id="metal"><option>Silver</option><option>Billon / uncertain silver</option><option>Silver-plated</option><option>Other</option></select></div>
+    <div><label>Batch note</label><input id="batchNote" placeholder="optional"></div>
+  </div>
+  <label>Visible observations</label>
+  <textarea id="notes" placeholder="Owl? Arabic legend? Countermark? Bust? Symbols? Anything you can actually see."></textarea>
+
+  <button class="primary" onclick="identify()" id="identifyBtn" style="margin-top:12px">IDENTIFY + NUMISTA CHECK</button>
+  <div id="idStatus" class="status hidden"></div>
+
+  <div id="idResult" class="card result hidden"></div>
+
+  <button class="gold hidden" id="valueBtn" onclick="valueCoin()">CALCULATE QUICK-SALE VALUE</button>
+  <div id="valueResult" class="card result hidden"></div>
+
+  <button class="gold hidden" id="saveBtn" onclick="saveCoin()">SAVE TO SWISH</button>
+  <button class="primary" onclick="resetCoin()" style="margin-top:10px">NEXT COIN</button>
+</div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://iwgaqieyoahmcjfziwga.backend.onspace.ai';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3ODkwNjM4MTgsImV4cCI6MjEwNDQyMzgxOCwicmVmIjoiaXdnYXFpZXlvYWhtY2pmeml3Z2EiLCJyb2xlIjoiYW5vbiIsImlzcyI6Im9uc3BhY2UifQ.cioQ38guPLFAbl3x48mUaJcMSxU5IpZn7-H-JhtvXJc';
+let sb=null, tenant=null, identification=null, valuation=null;
+
+function $(id){return document.getElementById(id)}
+function show(id,on=true){$(id).classList.toggle('hidden',!on)}
+function status(t){$('idStatus').textContent=t;show('idStatus',true)}
+async function init(){
+  try{
+    if(!window.supabase){
+      throw new Error('Supabase library did not load. Open this file in Safari/Chrome as a web page, not the iPhone Files preview.');
+    }
+    sb=window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {auth:{persistSession:true,autoRefreshToken:true}});
+    $('startupBanner').textContent='KeenOnCoins ready — sign in to SWISH below.';
+    $('startupBanner').className='status ok';
+    const x=await sb.auth.getSession();
+    if(x.data.session) boot();
+    else show('login',true);
+  }catch(e){
+    $('startupBanner').textContent='Startup error: '+(e.message||e);
+    $('startupBanner').className='status warn';
+    show('login',true);
+  }
+}
+async function login(){
+  const {error}=await sb.auth.signInWithPassword({email:$('email').value.trim(),password:$('password').value});
+  if(error) return alert(error.message); boot();
+}
+async function boot(){
+  show('setup',false);show('login',false);show('app',true);
+  const r=await sb.from('tenants').select('id,name').order('created_at',{ascending:true}).limit(1).maybeSingle();
+  if(r.error) return alert('Tenant lookup failed: '+r.error.message);
+  tenant=r.data;
+  if(!tenant) return alert('No SWISH tenant found for this account.');
+  $('tenantName').textContent=tenant.name+' · existing SWISH inventory';
+}
+async function signout(){await sb.auth.signOut();location.reload()}
+function preview(input,id){
+  const f=input.files[0];if(!f)return;
+  const u=URL.createObjectURL(f);$(id).innerHTML='<img src="'+u+'">';
+}
+function fileToData(f){
+  return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(f)})
+}
+async function identify(){
+  if(!tenant)return alert('Not connected.');
+  const files=[$('obv').files[0],$('rev').files[0]].filter(Boolean);
+  if(!files.length)return alert('Take at least one coin photo.');
+  $('identifyBtn').disabled=true;status('Analysing physical evidence and checking Numista…');
+  try{
+    const images=await Promise.all(files.map(fileToData));
+    const knownAttributes={
+      weight: $('weight').value?Number($('weight').value):undefined,
+      diameter: $('diameter').value?Number($('diameter').value):undefined,
+      material: $('metal').value,
+      customNotes: $('notes').value||undefined,
+      goal: 'Conservative attribution for a loose quick-sale listing. Do not invent denomination, ruler, mint, date or catalogue number. Prefer not established / possible when evidence is insufficient.'
+    };
+    const r=await sb.functions.invoke('swish-identify',{body:{tenantId:tenant.id,specialistId:'coins_currency',images,knownAttributes}});
+    if(r.error)throw r.error;
+    identification=r.data.identification;
+    renderIdentification();
+    show('valueBtn',true);show('saveBtn',true);
+    status('Identification complete. Review the evidence before saving.');
+  }catch(e){status('Identification error: '+(e.message||e));}
+  finally{$('identifyBtn').disabled=false}
+}
+function renderIdentification(){
+  const x=identification||{};
+  const title=x.canonicalTitle||'Attribution not established';
+  const conf=Math.round(Number(x.confidence||0)*100);
+  const tier=x.confidenceTier||x.identificationState||'unknown';
+  const nv=x.numistaVerification||x.numista||null;
+  $('idResult').innerHTML='<h2>'+esc(title)+'</h2>'+
+    '<span class="pill">Confidence '+conf+'%</span><span class="pill">'+esc(tier)+'</span>'+
+    (nv&&nv.typeId?'<span class="pill">Numista N#'+esc(nv.typeId)+'</span>':'')+
+    '<p>'+esc(x.identificationSummary||x.description||'')+'</p>'+
+    '<p><b>Listing wording:</b> '+esc(x.listingTitle||x.canonicalTitle||'')+'</p>'+
+    '<p class="muted"><b>Warnings:</b> '+esc((x.warnings||[]).join(' · ')||'None reported')+'</p>'+
+    '<p class="muted"><b>Missing / unestablished:</b> '+esc((x.missingInformation||[]).join(' · ')||'None reported')+'</p>';
+  show('idResult',true);
+}
+async function valueCoin(){
+  if(!identification)return alert('Identify first.');
+  $('valueBtn').disabled=true;
+  try{
+    const nv=identification.numistaVerification||{};
+    const r=await sb.functions.invoke('swish-market-value',{body:{
+      tenantId:tenant.id,
+      title:identification.canonicalTitle||'Silver coin — attribution provisional',
+      specialistId:'coins_currency',
+      attributes:{...identification.coinFields,...identification.attributesConfirmed,weight_grams:$('weight').value?Number($('weight').value):undefined,diameter_mm:$('diameter').value?Number($('diameter').value):undefined},
+      condition:identification.condition||'unknown',
+      identificationConfidence:Number(identification.confidence||0),
+      identificationTier:identification.confidenceTier||identification.identificationState,
+      numistaTypeId:nv.typeId||identification.numistaTypeId||undefined,
+      numistaMatchScore:nv.matchScore||identification.numistaMatchScore||undefined,
+      numistaMatchTier:nv.matchTier||identification.numistaMatchTier||undefined,
+      applyToItem:false
+    }});
+    if(r.error)throw r.error;
+    valuation=r.data.valuation||r.data;
+    const q=Number(valuation.recommendedListingPrice||0);
+    // Deliberately label the engine's recommendation as evidence-derived, not a guaranteed sale price.
+    $('valueResult').innerHTML='<h2>Quick-sale evidence</h2>'+
+      '<div class="price">£'+q.toFixed(2)+'</div>'+
+      '<div class="muted">Recommended listing price from SWISH market evidence</div>'+
+      '<p><b>Evidence range:</b> £'+Number(valuation.valuationLow||0).toFixed(2)+' – £'+Number(valuation.valuationHigh||0).toFixed(2)+'</p>'+
+      '<p><b>Confidence:</b> '+esc(valuation.valuationConfidence||'unknown')+'</p>'+
+      '<p>'+esc(valuation.listingPriceRationale||valuation.valuationMethod||'')+'</p>'+
+      '<p class="warn">'+esc((valuation.valuationWarnings||[]).join(' · ')||'No valuation warnings returned.')+'</p>';
+    show('valueResult',true);
+  }catch(e){alert('Valuation error: '+(e.message||e))}
+  finally{$('valueBtn').disabled=false}
+}
+async function saveCoin(){
+  if(!tenant||!identification)return alert('Identify first.');
+  const title=identification.canonicalTitle||'Silver coin — attribution provisional';
+  const {data:inventoryId,error:idErr}=await sb.rpc('kc_next_inventory_id',{p_tenant_id:tenant.id});
+  if(idErr) return alert(idErr.message);
+  const media=[];
+  const attrs={
+    object_type:'coin',
+    metal:$('metal').value,
+    weight_grams:$('weight').value?Number($('weight').value):null,
+    diameter_mm:$('diameter').value?Number($('diameter').value):null,
+    ...(identification.coinFields||{}),
+    ...(identification.attributesConfirmed||{}),
+    numista_verification:identification.numistaVerification||null,
+    quick_sale_valuation:valuation||null,
+    user_observations:$('notes').value||''
+  };
+  const payload={
+    tenant_id:tenant.id,
+    canonical_title:title,
+    description:$('notes').value||'',
+    specialist_id:'coins_currency',
+    status:identification.identificationState==='verified'?'identified':'review_required',
+    disposition_decision:'sell_individual',
+    condition:identification.condition||'',
+    condition_grade:identification.conditionGrade||'',
+    condition_notes:identification.conditionNotes||'',
+    identification_confidence:Number(identification.confidence||0),
+    identification_source:'swish-identify',
+    valuation_low:Number(valuation?.valuationLow||0),
+    valuation_mid:Number(valuation?.valuationMid||0),
+    valuation_high:Number(valuation?.valuationHigh||0),
+    valuation_confidence:valuation?.valuationConfidence||'unknown',
+    expected_selling_price:Number(valuation?.recommendedListingPrice||0),
+    expected_net:0,
+    expected_profit:0,
+    sale_prob_30d:Number(valuation?.saleProb30d||0),
+    attributes:attrs,
+    media:media,
+    warnings:identification.warnings||[],
+    tags:['silver_batch','quick_add'],
+    acquired_cost:0,
+    inventory_id:inventoryId,
+    weight_grams:$('weight').value?Number($('weight').value):null,
+    material:$('metal').value
+  };
+  const r=await sb.from('items').insert(payload).select('id,inventory_id').single();
+  if(r.error)return alert('Save failed: '+r.error.message);
+  alert('Saved to SWISH as '+r.data.inventory_id);
+  resetCoin();
+}
+function resetCoin(){
+  ['obv','rev','weight','diameter','batchNote','notes'].forEach(id=>$(id).value='');
+  $('obvPreview').innerHTML='<span>OBVERSE</span>'; $('revPreview').innerHTML='<span>REVERSE</span>';
+  identification=null;valuation=null;show('idStatus',false);show('idResult',false);show('valueBtn',false);show('valueResult',false);show('saveBtn',false);
+}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+init();
+</script>
+</body></html>
